@@ -1,0 +1,75 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.linear_model import LogisticRegression
+import joblib
+data = {
+    "age": np.random.randint(18, 60, 500),
+    "gender": np.random.choice(["male", "female"], 500),
+    "height": np.random.randint(150, 200, 500),
+    "weight": np.random.randint(50, 120, 500),
+    "activity_level": np.random.choice(["sedentary", "lightly_active", "active", "very_active"], 500),
+    "carbs_pct": np.random.uniform(40, 60, 500),  # Carbohydrate percentage
+    "protein_pct": np.random.uniform(20, 30, 500),  # Protein percentage
+    "fat_pct": np.random.uniform(20, 30, 500),  # Fat percentage
+}
+
+df = pd.DataFrame(data)
+
+# Encode categorical features
+label_enc = LabelEncoder()
+df["gender"] = label_enc.fit_transform(df["gender"])  # Male: 1, Female: 0
+df["activity_level"] = df["activity_level"].map({"sedentary": 0, "lightly_active": 1, "active": 2, "very_active": 3})
+
+# Features & Target Variables
+X = df[["age", "gender", "height", "weight", "activity_level"]]
+Y = df[["carbs_pct", "protein_pct", "fat_pct"]]  # Macronutrient distribution
+
+# Train-Test Split
+X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+
+# Scale Data
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+# Train Model
+model = LogisticRegression(multi_class="multinomial", solver="lbfgs", max_iter=1000)
+model.fit(X_train, Y_train)
+
+# Save Model & Scaler
+joblib.dump(model, "nutrition_model.pkl")
+joblib.dump(scaler, "scaler.pkl")
+joblib.dump(label_enc, "label_encoder.pkl")
+from fastapi import FastAPI
+import joblib
+import numpy as np
+
+app = FastAPI()
+
+# Load trained model & scaler
+model = joblib.load("nutrition_model.pkl")
+scaler = joblib.load("scaler.pkl")
+label_enc = joblib.load("label_encoder.pkl")
+
+@app.get("/predict_macronutrients")
+def predict_macronutrients(age: int, gender: str, height: int, weight: int, activity_level: str):
+    # Encode categorical variables
+    gender_encoded = 1 if gender.lower() == "male" else 0
+    activity_mapping = {"sedentary": 0, "lightly_active": 1, "active": 2, "very_active": 3}
+    activity_encoded = activity_mapping.get(activity_level.lower(), 0)
+
+    # Prepare input
+    input_data = np.array([[age, gender_encoded, height, weight, activity_encoded]])
+    input_scaled = scaler.transform(input_data)
+
+    # Predict Macronutrient Distribution
+    prediction = model.predict_proba(input_scaled)
+
+    return {
+        "carbs_probability": prediction[0][0],
+        "protein_probability": prediction[0][1],
+        "fat_probability": prediction[0][2],
+    }
+uvicorn main:app --reload
